@@ -1,0 +1,8 @@
+#node modules
+node_modules
+
+#environment_variable
+.env 
+
+#temp_file_store
+uploads
