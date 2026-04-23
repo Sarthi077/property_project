@@ -73,8 +73,8 @@ export const createProperty=async(req,res)=>{
             const [rows]=await connection.execute(
             `insert into fields  
                 (name, slug, description, city , country 
-                , rent , amount , bedRooms ,p_id,user_id)
-                values (?,?,?,?,?,?,?,?,?,?)`,
+                , rent , amount , bedRooms ,p_id,user_id,is_active)
+                values (?,?,?,?,?,?,?,?,?,?,1)`,
                 [   name,slug,description,city,country,
                     rent,amount,bedRooms,pId,userId
                 ],
@@ -165,52 +165,60 @@ export const  updateProperty=async(req,res)=>{
             if(rows.length==0){
                 return  res.status(404).json({
                     status:false,
-                    message:"property not found "
+                    message:"property not found"
                 })
             }
 
-            // await connection.execute(
-            //     `
-            //     update fields set name=?,slug=?,description=?,
-            //     country=?,city=?,rent_price=?,deposit=?,bedroom=? where p_id=?
-            //     `,[name,slug,description,country,city,rent,amount,bedRooms,pId]
-            // )
-
-
             const updates = {};
 
-            if (fields.name?.[0]) {
-                updates.name = fields.name[0];
-                updates.slug = slugify(fields.name[0], { strict: true, lower: true });
+            // --- Text fields: only update if sent and non-empty ---
+            if (fields.name?.[0]?.trim()) {
+                const newName = fields.name[0].trim();
+                updates.name = newName;
+                updates.slug = slugify(newName, { strict: true, lower: true });
 
                 const [result] = await connection.query(
-                    `SELECT * FROM fields WHERE slug=? and p_id!=?`
-                    , [updates.slug,pId]);
-
+                    `SELECT * FROM fields WHERE slug=? AND p_id!=?`,
+                    [updates.slug, pId]
+                );
                 if (result.length > 0) {
                     return res.status(400).json({
-                        success: false,
-                        message: "Name already exists, Change Property Name",
+                        status: false,
+                        message: "Property name already exists. Please use a different name.",
                     });
                 }
             }
 
-            if (fields.description?.[0]) updates.description = fields.description[0];
-            if (fields.city?.[0]) updates.city = fields.city[0];
-            if (fields.country?.[0]) updates.country = fields.country[0];
-            if (fields.rent?.[0]) updates.rent = fields.rent[0];
-            if (fields.amount?.[0])updates.amount = fields.amount[0];
-            if (fields.bedRooms?.[0]) updates.bedRooms = fields.bedRooms[0];
-            
-            console.log("updates=",updates);
+            if (fields.city?.[0]?.trim())    updates.city    = fields.city[0].trim();
+            if (fields.country?.[0]?.trim()) updates.country = fields.country[0].trim();
+
+            // --- Description: always update when sent (allow clearing) ---
+            if (Array.isArray(fields.description)) {
+                updates.description = fields.description[0] ?? '';
+            }
+
+            // --- Numeric fields: update when sent, convert to number ---
+            if (fields.rent?.[0] !== undefined && fields.rent[0] !== '') {
+                updates.rent = Number(fields.rent[0]);
+            }
+            if (fields.bedRooms?.[0] !== undefined && fields.bedRooms[0] !== '') {
+                updates.bedRooms = Number(fields.bedRooms[0]);
+            }
+            // Amount (security deposit) can be 0 — treat '' as 0
+            if (Array.isArray(fields.amount)) {
+                updates.amount = fields.amount[0] === '' ? 0 : Number(fields.amount[0]);
+            }
+
+            console.log("updates=", updates);
 
             if (Object.keys(updates).length > 0) {
                 await connection.query(
-                    `UPDATE fields SET ? WHERE p_id = ?`
-                    , [updates, pId]
+                    `UPDATE fields SET ? WHERE p_id = ?`,
+                    [updates, pId]
                 );
             }
 
+            // --- Images ---
             let images = files.images;
 
             if (images) {
@@ -219,8 +227,8 @@ export const  updateProperty=async(req,res)=>{
                 }
 
                 const [oldImages] = await connection.query(
-                    `SELECT image_url FROM property_image WHERE p_id=?`
-                    , [pId]
+                    `SELECT image_url FROM property_image WHERE p_id=?`,
+                    [pId]
                 );
 
                 for (const img of oldImages) {
@@ -231,8 +239,8 @@ export const  updateProperty=async(req,res)=>{
                 }
 
                 await connection.query(
-                    "DELETE FROM property_image WHERE p_id=?"
-                    , [pId]
+                    "DELETE FROM property_image WHERE p_id=?",
+                    [pId]
                 );
 
                 const imageValues = [];
@@ -242,36 +250,31 @@ export const  updateProperty=async(req,res)=>{
                         fs.unlinkSync(image.filepath);
                         continue;
                     }
-
                     const imagePath = `uploads/properties/${path.basename(image.filepath)}`;
                     imageValues.push([pId, imagePath]);
                 }
 
                 if (imageValues.length > 0) {
                     await connection.query(
-                        "INSERT INTO property_image (p_id, image_url) VALUES ?"
-                        , [imageValues,]
+                        "INSERT INTO property_image (p_id, image_url) VALUES ?",
+                        [imageValues]
                     );
                 }
             }
 
-
             return res.status(200).json({
-                status:true,
-                message:"update property done"
-            })
+                status: true,
+                message: "Property updated successfully"
+            });
 
-        }
-
-
-        catch(err){
+        } catch(err) {
 
             console.error(err);
 
             return res.status(500).json({
-                status:false,
-                message:"  update property failed"
-            })
+                status: false,
+                message: "Update property failed"
+            });
 
         }
     })
@@ -342,11 +345,15 @@ export const listProperty=async(req,res)=>{
     
     try{
 
-        
         const [properties]=await connection.execute(
-            `
-            select * from fields where user_id=? and is_active=true order by created_at 
-            `,[req.user]
+            `SELECT f.*,
+             GROUP_CONCAT(pi.image_url SEPARATOR ',') as image_urls
+             FROM fields f
+             LEFT JOIN property_image pi ON f.p_id = pi.p_id
+             WHERE f.user_id=? AND f.is_active=true
+             GROUP BY f.p_id
+             ORDER BY f.created_at`
+            ,[req.user]
         )
 
         if(properties.length==0){
@@ -356,11 +363,16 @@ export const listProperty=async(req,res)=>{
             })
         }
 
+        const processed = properties.map(p => ({
+            ...p,
+            images: p.image_urls ? p.image_urls.split(',') : []
+        }));
+
         return res.status(200).json({
         
             success:true,
             message:"listing all property done",
-            properties
+            properties: processed
 
         })
 
@@ -392,19 +404,28 @@ export const listAllProperty=async(req,res)=>{
         console.log(page, limit);
 
         const [properties]= await connection.query(
-            `select * from fields 
-            where is_active=1 
-            order by created_at desc 
-            limit ? , ? `
+            `SELECT f.*,
+             GROUP_CONCAT(pi.image_url SEPARATOR ',') as image_urls
+             FROM fields f
+             LEFT JOIN property_image pi ON f.p_id = pi.p_id
+             WHERE f.is_active=1
+             GROUP BY f.p_id
+             ORDER BY f.created_at DESC
+             LIMIT ?, ?`
             ,[offset,limit]
         )
+
+        const processed = properties.map(p => ({
+            ...p,
+            images: p.image_urls ? p.image_urls.split(',') : []
+        }));
 
         return res.status(200).json({
             status:true,
             message:" public active property",
             page,
             limit,
-            properties
+            properties: processed
         })
 
     }

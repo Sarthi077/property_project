@@ -1,5 +1,14 @@
 import express from "express";
-import { registerUser, loginUser, getUserProfile, deleteUserProfile,  userLogout, editUserProfile, changePassword } from "../controller/userController.js";
+
+import { registerUser, 
+    loginUser,
+    getUserProfile, 
+    deleteUserProfile,  
+    userLogout, 
+    editUserProfile, 
+    changePassword }
+    from "../controller/userController.js";
+
 import isAuthenticated from "../middleware/isAuthenticated.js";
 import { isEmailVerify } from "../middleware/isEmailVerify.js";
 

@@ -6,6 +6,7 @@ import {
   updateProperty,
   listAllProperty,
 } from "../controller/propertyController.js";
+
 import isAuthenticated from "../middleware/isAuthenticated.js";
 import { isEmailVerify } from "../middleware/isEmailVerify.js";
 

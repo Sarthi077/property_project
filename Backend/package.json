@@ -12,6 +12,8 @@
   "description": "",
   "dependencies": {
     "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "eslint": "^9.39.2",
     "express": "^5.2.1",
     "formidable": "^3.5.4",

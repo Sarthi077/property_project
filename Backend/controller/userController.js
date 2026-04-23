@@ -9,59 +9,78 @@ dotenv.config();
 
 export const registerUser=async(req,res)=>{
 
-    const {userId,userName,userEmail,userPass} = req.body;
-    
+    try {
+        const {userId: userIdRaw,userName,userEmail,userPass} = req.body;
 
-    if(!userId || !userName || !userEmail || !userPass){
-        return res.status(400).json({
-            status:false,
-            message:"all fields are required"
-        })
+        let userId = Number.parseInt(userIdRaw, 10);
+
+        if(!userName || !userEmail || !userPass){
+            return res.status(400).json({
+                status:false,
+                message:"all fields are required"
+            })
+        }
+
+        if (!Number.isInteger(userId) || userId <= 0) {
+            const [rows] = await connection.execute(
+                `select coalesce(max(user_id), 0) + 1 as nextId from users`
+            );
+            userId = rows?.[0]?.nextId;
+        }
+
+        const [existingUser]=await connection.execute(
+            `
+            select user_id from users where user_email=?     
+            `,[userEmail]
+        )
+
+        if(existingUser.length>0){
+
+            return res.status(409).json({
+                status:false,
+                message:"email already exists"
+            })
+        }
+
+        const hashPass = await bcrypt.hash(userPass, 10);
+
+        await connection.execute(
+            `insert into users  
+            (user_id,user_email,user_name,user_pass,hash_pass) 
+            values(?,?,?,?,?)`,
+            [userId, userEmail, userName, userPass, hashPass]
+        );
+
+        let link = null;
+        try {
+            link = await generateEmailVerifyToken(userEmail,userPass);
+        } catch (error) {
+            console.error('Email verification step failed, but registration was created:', error);
+        }
+
+        const token=jwt.sign(
+            {
+                user_id:userId,
+                email:userEmail
+            },
+            process.env.JWT_SECRET,
+            {expiresIn:'1d'}
+        )
+
+        return res.status(200).json({
+            status: "success",
+            message: "Registered successfully. Please verify your email.",
+            link,
+            token
+        });
     }
-    
-    
-    const [existingUser]=await connection.execute(
-        `
-        select user_id from users where user_email=?     
-        `,[userEmail]
-    )
-
-    if(existingUser.length>0){
-
-        return res.status(404).json({
+    catch (err) {
+        console.error(err);
+        return res.status(500).json({
             status:false,
-            message:"email already exists"
-        })
+            message:"registration failed"
+        });
     }
-    
-    const hashPass = await bcrypt.hash(userPass, 10);
-
-    const [result] = await connection.execute(
-        `insert into users  
-        (user_id,user_email,user_name,user_pass,hash_pass) 
-        values(?,?,?,?,?)`,
-        [userId, userEmail, userName, userPass, hashPass]
-    );
-    
-    const  link=await generateEmailVerifyToken(userEmail,userPass);
-
-    const token=jwt.sign(
-        {
-            userId:result.userId,
-            email:userEmail
-        },
-        process.env.JWT_SECRET,
-        {expiresIn:'1d'}
-    )
-
-    
-
-    return res.status(200).json({
-        status: "success",
-        message: "Registered successfully. Please verify your email.",
-        link,
-        token
-    });
 }
 
 
@@ -81,14 +100,14 @@ export const loginUser=async(req,res)=>{
             return res.status(400).json({
             
                 status: 400,
-                message: "username and passsword is required ",
+                message: "username and password is required ",
 
             });
         }
         
 
         const [rows] = await connection.execute(
-            `select user_id, user_email,hash_pass from users where user_email=? `,
+            `select user_id, user_email, hash_pass, is_active, is_verify from users where user_email=? `,
             [email]
         );
     
@@ -105,7 +124,7 @@ export const loginUser=async(req,res)=>{
         const user = rows[0];
 
 
-        if(rows.is_active==0){
+        if(user.is_active==0){
             return res.status(400).json({
                 status:false,
                 message:"user deleted account"
@@ -113,12 +132,12 @@ export const loginUser=async(req,res)=>{
         }
 
 
-        if(rows.is_verify==0){
-            return res.status(400).json({
-                status:false,
-                message:" please verify your email"
-            })
-        }
+        // if(user.is_verify==0){
+        //     return res.status(400).json({
+        //         status:false,
+        //         message:" please verify your email"
+        //     })
+        // }
 
         const passMatch = await bcrypt.compare(password, user.hash_pass);
 

@@ -1,0 +1,78 @@
+import {v4 as uuidv4}from 'uuid';
+import { sendEmail } from "../config/verifyMail.js";
+import { connection } from "../config/db.js";
+import  dotenv from 'dotenv'
+dotenv.config();
+
+export const generateEmailVerifyToken=async(email,password)=>{
+    console.log("email=",email);
+    console.log("password=",password);
+    const token=uuidv4();
+    console.log("token=", token);  
+    const expireAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    console.log("expiry token time ", expireAt);
+    const tokenStore = await connection.execute(
+        `insert into emailVerify 
+        (email,passwrd,token,expire) values
+        (?,?,?,?)`,[email,password,token,expireAt]
+    );
+    console.log("token store in db = ",tokenStore); 
+    
+    const verificationLink=`${process.env.APP_URL}/api/verify/verify-email?token=${token}`;
+    console.log(verificationLink);
+
+    console.log("link for verify=",verificationLink);
+
+    await sendEmail({
+        to: email,
+        subject: "Verify your email",
+        html: `
+            <h2>Email Verification</h2>
+            <p>Please click the link below to verify your email:</p>
+            <a href="${verificationLink}">${verificationLink}</a>
+            <p>This link expires in 24 hours.</p>
+            `,
+        });
+}
+
+export const verifyEmail=async(req,res)=>{
+    const {token}=req.query;
+    console.log(token)
+
+    if (!token) {
+        return res.status(400).json({
+        message: "Verification token is required",
+        success: false,
+      });
+    }
+    try{
+        const [record]=await connection.execute(
+            `select * from emailVerify where token=? and expire>NOW()`,[token]
+        )
+        if(record.length==0){
+            return res.status(400).json({
+                success:false,
+                message:"Invalid  or expire token "
+            })
+        }
+        const verify=record[0];
+
+        await connection.execute(
+            `  UPDATE users SET is_verify=TRUE WHERE user_email=?`,
+            [verify.email]
+        )
+        
+        return res.status(200).json({
+           success: true,
+           message: "Email verified successfully",
+        });
+
+    }
+    catch(err){
+        console.error(err);
+        return res.status(401).json({
+            success:"false",
+            message:" Error verifyEmail"
+        });
+    }
+}

@@ -73,7 +73,7 @@ export const verifyEmail=async(req,res)=>{
         
         await connection.execute(
             `
-            delete from email_verify  token where email=?
+            delete from email_verify where email=?
             `,[verify.email]
         )
 
