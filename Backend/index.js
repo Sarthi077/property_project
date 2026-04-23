@@ -22,7 +22,7 @@ app.get("/", (req, res) => {
 
 
 app.use("/api/verify", verifyEmail);
-
+  
 
 app.use("/api/user",userRoute);
 
